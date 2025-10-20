@@ -4,8 +4,8 @@
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "256",
   "memory": "512",
-  "executionRoleArn": "arn:aws:iam::123456789012:role/ecsTaskExecutionRole",
-  "taskRoleArn": "arn:aws:iam::123456789012:role/ecsAppTaskRole",
+  "executionRoleArn": "arn:aws:iam::343562361305:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::343562361305:role/ecsAppTaskRole",
   "containerDefinitions": [
     {
       "name": "fastapi-app",
