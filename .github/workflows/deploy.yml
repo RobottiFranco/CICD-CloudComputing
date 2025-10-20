@@ -1,11 +1,36 @@
-name: Deploy FastAPI to ECS
+name: Test & Deploy FastAPI to ECS
 
 on:
   push:
     branches: [ "main" ]
 
+concurrency:
+  group: ecs-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps (app + dev)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r app/requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest -q
+
   deploy:
+    needs: test   # <- no corre si 'test' falla
     runs-on: ubuntu-latest
 
     steps:
@@ -23,21 +48,30 @@ jobs:
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
+    - name: Ensure ECR repo exists (fastapi-demo)
+      run: |
+        aws ecr describe-repositories --repository-names fastapi-demo >/dev/null 2>&1 || \
+        aws ecr create-repository --repository-name fastapi-demo
+
     - name: Build, tag, and push image to ECR
       run: |
         IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/fastapi-demo:${{ github.sha }}
+        echo "Building $IMAGE_URI"
         docker build -t $IMAGE_URI .
         docker push $IMAGE_URI
         echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
 
     - name: Deploy new image to ECS
       run: |
+        # sustituye la imagen en el taskdef y registra nueva revision
         NEW_TD=$(jq --arg IMG "$IMAGE_URI" \
           '(.containerDefinitions[] | select(.name=="fastapi-app") | .image) |= $IMG' ecs-taskdef.json)
         echo "$NEW_TD" > new-taskdef.json
         aws ecs register-task-definition --cli-input-json file://new-taskdef.json \
           --query 'taskDefinition.taskDefinitionArn' --output text > taskdef_arn.txt
         TD_ARN=$(cat taskdef_arn.txt)
+
+        # actualiza el servicio y espera estabilidad
         aws ecs update-service \
           --cluster fastapi-demo-cluster \
           --service fastapi-demo-service \

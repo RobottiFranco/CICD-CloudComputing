@@ -4,7 +4,8 @@ app = FastAPI()
 
 @app.get("/")
 def root():
-    return {"message": "Hola Clase!"}
+    fecha_hora = __import__('datetime').datetime.now()
+    return {"message": "Hola !", "fecha_hora": fecha_hora}
 
 @app.get("/ping")
 def ping():
