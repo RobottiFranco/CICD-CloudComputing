@@ -1,0 +1,46 @@
+name: Deploy FastAPI to ECS
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build, tag, and push image to ECR
+      run: |
+        IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/fastapi-jenkins-demo:${{ github.sha }}
+        docker build -t $IMAGE_URI .
+        docker push $IMAGE_URI
+        echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+
+    - name: Deploy new image to ECS
+      run: |
+        NEW_TD=$(jq --arg IMG "$IMAGE_URI" \
+          '(.containerDefinitions[] | select(.name=="fastapi-app") | .image) |= $IMG' ecs-taskdef.json)
+        echo "$NEW_TD" > new-taskdef.json
+        aws ecs register-task-definition --cli-input-json file://new-taskdef.json \
+          --query 'taskDefinition.taskDefinitionArn' --output text > taskdef_arn.txt
+        TD_ARN=$(cat taskdef_arn.txt)
+        aws ecs update-service \
+          --cluster fastapi-demo-cluster \
+          --service fastapi-demo-service \
+          --task-definition $TD_ARN \
+          --force-new-deployment
+        aws ecs wait services-stable --cluster fastapi-demo-cluster --services fastapi-demo-service
