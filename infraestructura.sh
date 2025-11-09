@@ -39,7 +39,7 @@ aws iam create-role \
   --assume-role-policy-document "$TRUST_POLICY" || true
 
 # ========= 3) LOG GROUP (para awslogs) =========
-aws logs create-log-group --log-group-name "$LOG_GROUP" --region "$REGION" 2>/dev/null || true
+MSYS_NO_PATHCONV=1 aws logs create-log-group --log-group-name /ecs/fastapi-demo --region us-east-1 2>/dev/null || true
 
 # ========= 4) CLUSTER ECS =========
 aws ecs create-cluster \
@@ -56,6 +56,11 @@ SG_ID=$(aws ec2 create-security-group \
   --vpc-id "$VPC_ID" \
   --query 'GroupId' --output text)
 
+SG_ID=$(aws ec2 describe-security-groups \
+  --filters Name=group-name,Values=fastapi-demo-sg \
+  --query 'SecurityGroups[0].GroupId' \
+  --output text)
+
 # Permitir tráfico entrante al puerto 8080
 aws ec2 authorize-security-group-ingress \
   --group-id "$SG_ID" --protocol tcp --port "$PORT" --cidr 0.0.0.0/0  >/dev/null
@@ -64,14 +69,6 @@ aws ec2 authorize-security-group-ingress \
 SUBNETS=($(aws ec2 describe-subnets --filters Name=vpc-id,Values=$VPC_ID \
   --query 'Subnets[?MapPublicIpOnLaunch==`true`].SubnetId' --output text))
 # (si no devuelve 2+, elegí manualmente dos subnets públicas)
-
-# ========= 6) ACTUALIZAR ecs-taskdef.json con tus ARNs =========
-# Asegúrate de que ecs-taskdef.json tenga:
-# "executionRoleArn": "arn:aws:iam::343562361305:role/ecsTaskExecutionRole"
-# "taskRoleArn":      "arn:aws:iam::343562361305:role/ecsAppTaskRole"
-# "family":           "fastapi-demo-task"
-# y el log group:     "/ecs/fastapi-demo"
-# (La imagen la sobreescribe el workflow)
 
 # Registrar Task Definition inicial
 aws ecs register-task-definition \
