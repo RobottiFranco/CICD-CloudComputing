@@ -1,4 +1,4 @@
-name: Test & Deploy FastAPI to ECS
+name: Test, Lint & Deploy FastAPI to ECS
 
 on:
   push:
@@ -9,8 +9,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  lint_and_test:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,59 +21,106 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('app/requirements.txt') }}
+
       - name: Install deps
         run: |
-          python -m pip install --upgrade pip
+          pip install --upgrade pip
           pip install -r app/requirements.txt
+          pip install black isort flake8 bandit
+
+      # ---- FORMATO ----
+      - name: Check formatting with Black
+        run: black --check app
+
+      - name: Check import order with isort
+        run: isort app --check-only
+
+      # ---- LINTER ----
+      - name: Lint with flake8
+        run: flake8 app
+
+      # ---- SECURITY ----
+      - name: Python security scan with Bandit
+        run: bandit -r app
+
+      # ---- TESTS ----
       - name: Run tests
         run: python -m pytest -q
 
   deploy:
-    needs: test   # <- no corre si 'test' falla
+    needs: lint_and_test
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-east-1
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
 
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
+      # ---- SCAN DE IMAGEN ----
+      - name: Install Trivy
+        run: |
+          sudo apt-get install -y wget
+          wget -qO- https://aquasecurity.github.io/trivy-repo/install.sh | sudo sh
+          sudo apt-get install trivy
 
-    - name: Ensure ECR repo exists (fastapi-demo)
-      run: |
-        aws ecr describe-repositories --repository-names fastapi-demo >/dev/null 2>&1 || \
-        aws ecr create-repository --repository-name fastapi-demo
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Build, tag, and push image to ECR
-      run: |
-        IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/fastapi-demo:${{ github.sha }}
-        echo "Building $IMAGE_URI"
-        docker build -t $IMAGE_URI .
-        docker push $IMAGE_URI
-        echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+      - name: Ensure ECR repo exists
+        run: |
+          aws ecr describe-repositories \
+            --repository-names fastapi-demo >/dev/null 2>&1 || \
+          aws ecr create-repository \
+            --repository-name fastapi-demo
 
-    - name: Deploy new image to ECS
-      run: |
-        # sustituye la imagen en el taskdef y registra nueva revision
-        NEW_TD=$(jq --arg IMG "$IMAGE_URI" \
-          '(.containerDefinitions[] | select(.name=="fastapi-app") | .image) |= $IMG' ecs-taskdef.json)
-        echo "$NEW_TD" > new-taskdef.json
-        aws ecs register-task-definition --cli-input-json file://new-taskdef.json \
-          --query 'taskDefinition.taskDefinitionArn' --output text > taskdef_arn.txt
-        TD_ARN=$(cat taskdef_arn.txt)
+      - name: Build Docker image
+        run: |
+          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/fastapi-demo:${{ github.sha }}"
+          echo "Building image $IMAGE_URI"
+          docker build -t "$IMAGE_URI" .
 
-        # actualiza el servicio y espera estabilidad
-        aws ecs update-service \
-          --cluster fastapi-demo-cluster \
-          --service fastapi-demo-service \
-          --task-definition $TD_ARN \
-          --force-new-deployment
-        aws ecs wait services-stable --cluster fastapi-demo-cluster --services fastapi-demo-service
+      # ---- SCAN DE SEGURIDAD DE LA IMAGEN ----
+      - name: Scan container with Trivy
+        run: trivy image --exit-code 1 --severity HIGH,CRITICAL "$IMAGE_URI"
+
+      - name: Push image to ECR
+        run: docker push "$IMAGE_URI"
+
+      - name: Deploy new image to ECS
+        run: |
+          NEW_TD=$(jq --arg IMG "$IMAGE_URI" \
+            '(.containerDefinitions[] | select(.name=="fastapi-app") | .image) |= $IMG' ecs-taskdef.json)
+
+          echo "$NEW_TD" > new-taskdef.json
+
+          TD_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://new-taskdef.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+
+          aws ecs update-service \
+            --cluster fastapi-demo-cluster \
+            --service fastapi-demo-service \
+            --task-definition "$TD_ARN" \
+            --force-new-deployment
+
+          aws ecs wait services-stable \
+            --cluster fastapi-demo-cluster \
+            --services fastapi-demo-service
+
+      # ---- SMOKE TEST ----
+      - name: Smoke test after deploy
+        run: |
+          sleep 10
+          curl -f https://tu-dns-o-loadbalancer/health
