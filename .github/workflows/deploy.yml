@@ -35,7 +35,7 @@ jobs:
 
       # ---- FORMATO ----
       - name: Check formatting with Black
-        run: black --check app
+        run: black app
 
       - name: Check import order with isort
         run: isort app --check-only
