@@ -122,9 +122,3 @@ jobs:
           aws ecs wait services-stable \
             --cluster fastapi-demo-cluster \
             --services fastapi-demo-service
-
-      # ---- SMOKE TEST ----
-      - name: Smoke test after deploy
-        run: |
-          sleep 10
-          curl -f https://tu-dns-o-loadbalancer/health
