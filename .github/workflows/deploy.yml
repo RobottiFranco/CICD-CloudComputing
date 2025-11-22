@@ -100,11 +100,11 @@ jobs:
         run: trivy image --exit-code 1 --severity HIGH,CRITICAL "${{ steps.build-image.outputs.image_uri }}"
         
       - name: Push image to ECR
-        run: docker push "$IMAGE_URI"
+        run: docker push "${{ steps.build-image.outputs.image_uri }}"
 
       - name: Deploy new image to ECS
         run: |
-          NEW_TD=$(jq --arg IMG "$IMAGE_URI" \
+          NEW_TD=$(jq --arg IMG "${{ steps.build-image.outputs.image_uri }}" \
             '(.containerDefinitions[] | select(.name=="fastapi-app") | .image) |= $IMG' ecs-taskdef.json)
 
           echo "$NEW_TD" > new-taskdef.json
