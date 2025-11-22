@@ -88,15 +88,17 @@ jobs:
             --repository-name fastapi-demo
 
       - name: Build Docker image
+        id: build-image
         run: |
           IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/fastapi-demo:${{ github.sha }}"
           echo "Building image $IMAGE_URI"
           docker build -t "$IMAGE_URI" .
+          echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
 
       # ---- SCAN DE SEGURIDAD DE LA IMAGEN ----
       - name: Scan container with Trivy
-        run: trivy image --exit-code 1 --severity HIGH,CRITICAL "$IMAGE_URI"
-
+        run: trivy image --exit-code 1 --severity HIGH,CRITICAL "${{ steps.build-image.outputs.image_uri }}"
+        
       - name: Push image to ECR
         run: docker push "$IMAGE_URI"
 
