@@ -1,5 +1,4 @@
 from fastapi import FastAPI
-import os
 
 app = FastAPI()
 
@@ -10,4 +9,4 @@ def root():
 
 @app.get("/ping")
 def ping():
-    return {"status": "500"}
+    return {"status": "500"
