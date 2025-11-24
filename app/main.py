@@ -1,16 +1,7 @@
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+import sqlite3
 
 app = FastAPI()
-
-# Security risk: Allows any origin
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Security: Should not allow all origins
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 @app.get("/")
 def root():
@@ -20,3 +11,12 @@ def root():
 @app.get("/ping")
 def ping():
     return {"status": "500"}
+
+@app.get("/users/{user_id}")
+def get_user(user_id: str):
+    conn = sqlite3.connect('database.db')
+    cursor = conn.cursor()
+    
+    # Security risk: SQL injection
+    cursor.execute(f"SELECT * FROM users WHERE id = {user_id}")  # Critical: SQL injection
+    return cursor.fetchall()
