@@ -33,11 +33,6 @@ aws iam attach-role-policy \
   --role-name ecsTaskExecutionRole \
   --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy || true
 
-# Rol de la app (opcional; agrega políticas si tu app usa S3/Dynamo, etc.)
-aws iam create-role \
-  --role-name ecsAppTaskRole \
-  --assume-role-policy-document "$TRUST_POLICY" || true
-
 # ========= 3) LOG GROUP (para awslogs) =========
 MSYS_NO_PATHCONV=1 aws logs create-log-group --log-group-name /ecs/fastapi-demo --region us-east-1 2>/dev/null || true
 
@@ -68,7 +63,6 @@ aws ec2 authorize-security-group-ingress \
 # Tomamos subnets públicas (con IP pública automática)
 SUBNETS=($(aws ec2 describe-subnets --filters Name=vpc-id,Values=$VPC_ID \
   --query 'Subnets[?MapPublicIpOnLaunch==`true`].SubnetId' --output text))
-# (si no devuelve 2+, elegí manualmente dos subnets públicas)
 
 # Registrar Task Definition inicial
 aws ecs register-task-definition \
