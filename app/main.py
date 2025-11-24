@@ -9,4 +9,4 @@ def root():
 
 @app.get("/ping")
 def ping():
-    return {"status": "ok"}
+    return {"status": "500"}
