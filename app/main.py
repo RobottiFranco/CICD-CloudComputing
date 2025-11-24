@@ -1,3 +1,4 @@
+# isort: skip_file
 from fastapi import FastAPI
 import sqlite3
 
